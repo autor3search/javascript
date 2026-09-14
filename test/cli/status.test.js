@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as gitx from '../../src/gitx.js'
 import { STATE_HOME_ENV, stateDir } from '../../src/state/index.js'
 import { claimEval } from '../../src/state/lock.js'
-import { requestStop } from '../../src/state/stop.js'
+import { requestForceStop, requestStop } from '../../src/state/stop.js'
 import { runCli } from '../helpers/cli.js'
 import { makeBenchRepo } from '../helpers/bench-repo.js'
 import { commitFiles, writeFiles } from '../helpers/repo.js'
@@ -68,6 +68,15 @@ describe('status', () => {
     expect(out).toMatch(new RegExp(`running \\(pid ${process.pid}\\)`))
     expect(out).toMatch(/stop\s+requested/)
     await claim.release()
+  })
+
+  it('shows a pending forced stop distinctly from a graceful one', async () => {
+    const dir = await ready()
+    const state = await stateDir(dir, 't')
+    await requestForceStop(state)
+    const { out } = await runCli(['status', '-C', dir])
+    expect(out).toMatch(/FORCED/)
+    expect(out).toMatch(/stop --clear/)
   })
 
   it('works from another branch when given -tag', async () => {

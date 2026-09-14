@@ -6,15 +6,15 @@
  * and only then does the loop exit. Nothing is thrown away.
  *
  * `--force` is for when a long benchmark cannot be waited out. It writes the
- * same request, then signals the running eval to abandon the experiment. It
- * REPORTS what state that leaves the repository in; it does not drop anything
- * for you, because deciding what to do with a half-finished experiment is the
- * human's call.
+ * same request, then marks the run for the running eval to poll and abandon
+ * the experiment on its own. It REPORTS what state that leaves the repository
+ * in; it does not drop anything for you, because deciding what to do with a
+ * half-finished experiment is the human's call.
  */
 import { parseArgs } from 'node:util'
 import * as gitx from '../gitx.js'
 import { evalRunning } from '../state/lock.js'
-import { clearStop, requestStop } from '../state/stop.js'
+import { clearStop, requestForceStop, requestStop } from '../state/stop.js'
 import { expandSingleDashFlags, resolveRun } from './context.js'
 
 /**
@@ -55,30 +55,30 @@ export async function runStop(args, io) {
     return 0
   }
 
-  // A corrupt pid file must not crash `stop --force` — it is refused by
-  // evalRunning rather than guessed at, but the request above already stands
-  // regardless, so fall back to "nothing known to signal" and keep going.
+  await requestForceStop(run.stateDir)
+
+  // Nothing is signalled between processes: the running eval polls this marker
+  // and cancels itself. That behaves identically on every platform — Windows
+  // has no process-to-process SIGTERM — and it cannot reach an unrelated
+  // process the way signalling a pid read from a file can, if the OS has
+  // recycled that pid since.
+  //
+  // evalRunning is therefore reporting, not mechanism. A corrupt pid file
+  // costs a line of the report and nothing else; the marker already stands.
   let pid = null
   let running = false
   try {
     ;({ pid, running } = await evalRunning(run.stateDir))
   } catch (err) {
-    io.err.write(`could not read the eval lock (${err.message}); assuming there is nothing to signal\n`)
+    io.err.write(`could not read the eval lock (${err.message}); cannot say whether an eval is running\n`)
   }
 
   if (running) {
-    // SIGTERM, not SIGKILL: eval installs a handler that tears down its child
-    // process groups. Killing it outright would leave Vitest workers running,
-    // burning CPU and corrupting every later measurement on this machine.
-    try {
-      process.kill(pid, 'SIGTERM')
-      io.out.write(`signalled eval (pid ${pid}) to abandon the current experiment\n`)
-    } catch (err) {
-      io.err.write(`could not signal eval (pid ${pid}): ${err.message}\n`)
-    }
+    io.out.write(`eval (pid ${pid}) will abandon the current experiment within a second\n`)
   } else {
-    io.out.write('no eval is running, so there was nothing to interrupt — the request stands\n')
+    io.out.write('no eval is running, so there was nothing to interrupt — the forced stop stands and will abort the next eval to start\n')
   }
+  io.out.write(`to cancel it: autor3search-javascript stop -tag ${run.tag} --clear\n`)
 
   // Report, do not act — whether or not anything was actually interrupted,
   // this is what the repository looks like right now. The commit an

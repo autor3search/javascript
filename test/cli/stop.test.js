@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { STATE_HOME_ENV, stateDir } from '../../src/state/index.js'
-import { stopRequested } from '../../src/state/stop.js'
+import { forceRequested, stopRequested } from '../../src/state/stop.js'
 import { runCli } from '../helpers/cli.js'
 import { makeBenchRepo } from '../helpers/bench-repo.js'
 import { commitFiles } from '../helpers/repo.js'
@@ -48,12 +48,34 @@ describe('stop', () => {
     const { code, out } = await runCli(['stop', '-C', dir, '--force'])
     expect(code).toBe(0)
     expect(out).toMatch(/no eval is running/i)
+    expect(out).toMatch(/will abort the next eval/i)
   })
 
   it('still writes the request when --force finds nothing to signal', async () => {
     const dir = await ready()
     await runCli(['stop', '-C', dir, '--force'])
     expect(await stopRequested(await stateDir(dir, 't'))).toBe(true)
+  })
+
+  it('writes the forced marker, not just the graceful request', async () => {
+    const dir = await ready()
+    await runCli(['stop', '-C', dir, '--force'])
+    expect(await forceRequested(await stateDir(dir, 't'))).toBe(true)
+  })
+
+  it('leaves no forced marker behind for a graceful stop', async () => {
+    // The two brakes mean different things: graceful finishes and scores the
+    // experiment, forced throws it away.
+    const dir = await ready()
+    await runCli(['stop', '-C', dir])
+    expect(await forceRequested(await stateDir(dir, 't'))).toBe(false)
+  })
+
+  it('--clear removes a forced marker too', async () => {
+    const dir = await ready()
+    await runCli(['stop', '-C', dir, '--force'])
+    await runCli(['stop', '-C', dir, '--clear'])
+    expect(await forceRequested(await stateDir(dir, 't'))).toBe(false)
   })
 
   it('reports the repository state and does not change it', async () => {

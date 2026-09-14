@@ -28,10 +28,23 @@ describe('check', () => {
     expect(named(await check(dir), 'git repo').severity).toBe(SEVERITY.FAIL)
   })
 
-  it('reports the cpu count and load average', async () => {
+  it('reports the cpu count, and a load average only where one exists', async () => {
     const findings = await check(await makeRepo())
     expect(named(findings, 'cpu').detail).toMatch(/\d+ logical/)
-    expect(named(findings, 'load').detail).toMatch(/\d/)
+    if (process.platform === 'win32') {
+      // os.loadavg() fabricates [0, 0, 0] on Windows. A tool whose whole job
+      // is predicting measurement reliability must not report a perfectly idle
+      // machine it never measured.
+      expect(named(findings, 'load').severity).toBe(SEVERITY.NA)
+      expect(named(findings, 'load').detail).toMatch(/no load average/i)
+    } else {
+      expect(named(findings, 'load').detail).toMatch(/\d/)
+    }
+  })
+
+  it('does not warn about the platform itself on Windows', async () => {
+    const findings = await check(await makeRepo())
+    expect(findings.some((f) => f.name === 'platform')).toBe(false)
   })
 
   it('reports free disk space', async () => {

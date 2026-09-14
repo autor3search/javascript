@@ -37,13 +37,7 @@ export async function check(dir) {
   const absDir = resolvePath(dir)
 
   const platformCheck =
-    platform() === 'darwin'
-      ? ['power', checkDarwin]
-      : platform() === 'linux'
-        ? ['cpu governor', checkLinux]
-        : platform() === 'win32'
-          ? ['platform', checkWindows]
-          : null
+    platform() === 'darwin' ? ['power', checkDarwin] : platform() === 'linux' ? ['cpu governor', checkLinux] : null
 
   const checks = [
     ['node', checkNode],
@@ -106,6 +100,13 @@ function checkCpu() {
 }
 
 function checkLoad() {
+  // os.loadavg() is not implemented on Windows: it returns a hardcoded
+  // [0, 0, 0]. Reporting that would tell a user under heavy load that their
+  // machine is perfectly idle — worse than saying nothing, in a tool that
+  // exists to predict whether measurement will be reliable.
+  if (platform() === 'win32') {
+    return { name: 'load', detail: 'no load average on this platform — check the machine is quiet yourself', severity: SEVERITY.NA }
+  }
   const [one] = loadavg()
   const perCore = one / Math.max(1, cpus().length)
   return {
@@ -142,28 +143,6 @@ async function checkVitest(dir) {
         detail: `vitest is not installed here — benchmarks cannot be measured until it is (looked for ${bin})`,
         severity: SEVERITY.WARN,
       }
-}
-
-/**
- * Windows is not a supported platform, and the reason is the stop path.
- *
- * 448 of 458 tests pass there, so most of the harness works — but Node cannot
- * deliver SIGINT to a child process group on Windows the way it does on POSIX,
- * so an interrupted `eval` does not reach the ABORTED path: it exits with a
- * null code instead of 2, and the run may leave a claim behind. An unattended
- * harness that cannot be reliably stopped is the wrong thing to be quiet about,
- * so this says it up front rather than at 3am.
- *
- * WSL reports linux and is unaffected.
- */
-function checkWindows() {
-  return {
-    name: 'platform',
-    detail:
-      'Windows is not a supported platform: an interrupted eval does not reach the ABORTED path, so a run ' +
-      'may not stop cleanly and can leave its claim behind. Measurement itself works. Use WSL for a supported setup.',
-    severity: SEVERITY.WARN,
-  }
 }
 
 function checkHeapHint() {

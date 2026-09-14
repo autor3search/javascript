@@ -12,6 +12,8 @@ import { REASON, STATUS } from '../src/verdict.js'
 import { FAST_WORDCOUNT, makeBenchRepo } from './helpers/bench-repo.js'
 import { commitFiles, writeFiles } from './helpers/repo.js'
 
+const posix = typeof process.getuid === 'function'
+
 /** Builds a repository with a baseline already recorded, ready for eval. */
 async function setup(overrides = {}) {
   const root = await makeBenchRepo()
@@ -181,7 +183,11 @@ describe('evalOnce — gates', () => {
   // strip read permission from its directory — a real "structural change to
   // the tree", and not one that shows up in `git diff` (permissions aren't
   // part of a tracked change), so it does not interact with the scope gate.
-  it('fails when a frozen file is restored but its directory cannot be listed', async () => {
+  // chmod is a no-op on Windows: there is no way to make a directory
+  // unlistable but still traversable there, so this specific gate cannot be
+  // provoked. Skipped and visible, rather than weakened on every platform to
+  // accommodate one.
+  it.skipIf(!posix)('fails when a frozen file is restored but its directory cannot be listed', async () => {
     const ctx = await setup()
     await chmod(join(ctx.root, 'src'), 0o111) // execute-only: lookup by path still works, readdir does not
     try {

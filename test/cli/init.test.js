@@ -114,7 +114,7 @@ describe('program.md stays in sync with the code it documents', () => {
     // document, so this can assert set equality in both directions without
     // tripping over unrelated backticked words (file names, config keys,
     // command names) that appear elsewhere in the file.
-    const match = text.match(/`reason` is a stable machine-readable code: ([\s\S]*?)\.\n/)
+    const match = text.match(/`reason` is a stable machine-readable code: ([\s\S]*?)\.\r?\n/)
     expect(match, 'could not find the reason-code paragraph in program.md').toBeTruthy()
     const documented = new Set([...match[1].matchAll(/`([a-z_]+)`/g)].map((m) => m[1]))
     expect(documented).toEqual(new Set(Object.values(REASON)))

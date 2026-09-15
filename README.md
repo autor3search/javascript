@@ -173,17 +173,19 @@ Three ways to end a run, in increasing order of force:
    under way finishes, is measured and scored normally; the agent sees
    `"stop_requested": true` on that verdict, applies it as usual (`KEEP`
    stays, anything else resets), then exits the loop. Nothing is thrown away.
-2. **`autor3search-javascript stop --force`** — writes the same request, then
-   sends `SIGTERM` to the running `eval`, which tears down its own child
-   process groups so no Vitest worker is left burning CPU. The agent sees
-   `"status": "ABORTED"`, exit code 2, and no `results.tsv` row — nothing was
-   measured, so nothing was recorded. `stop --force` reports what HEAD looks
-   like afterward; it does not touch the repository for you.
+2. **`autor3search-javascript stop --force`** — writes a sticky forced-stop
+   marker. The running `eval` polls for it and cancels itself, and that
+   cancellation is what tears down the benchmark process tree, so no Vitest
+   worker is left burning CPU. The agent sees `"status": "ABORTED"`, exit
+   code 2, and no `results.tsv` row — nothing was measured, so nothing was
+   recorded. `stop --force` reports what HEAD looks like afterward; it does
+   not touch the repository for you.
 3. **Ctrl+C** — the same abort path as `stop --force`, sent directly to a
    foreground `eval`.
 
-`autor3search-javascript stop --clear` cancels a pending stop request so the
-loop continues — that is your decision, never the agent's to make on its own.
+`autor3search-javascript stop --clear` cancels both a pending stop request and
+a pending forced stop, so the loop continues — that is your decision, never
+the agent's to make on its own.
 
 ## Commands
 
@@ -382,19 +384,26 @@ Two things to know if you are wiring this up on a fork or a new package:
 |---|---|
 | **Linux** | supported — CI runs the full suite on Node 20 and 22 |
 | **macOS** | supported — CI runs the full suite on Node 20 and 22 |
-| **Windows** | **not supported** |
+| **Windows** | supported — CI runs the full suite on Node 20 and 22 |
 
-On Windows nearly the whole suite passes, so measurement itself works. What does not
-work is stopping: Node cannot deliver SIGINT to a child process group there
-the way it does on POSIX, so an interrupted `eval` never reaches the `ABORTED`
-path — it exits with a null code instead of 2 and can leave its claim behind.
-An unattended harness that cannot be reliably stopped is not something to be
-quiet about, so `doctor` says so on Windows rather than letting you find out
-at 3am. Two further failures are the test suite's own POSIX assumptions
-(a `chmod`-unreadable directory, and path separators) rather than product bugs.
+All three behave identically, by design. `stop` and `stop --force` write marker
+files into the run's state directory rather than signalling a process: the
+running `eval` polls for a forced stop and cancels itself, and that cancellation
+is what tears the benchmark process tree down. A signal-based forced stop could
+not behave the same way everywhere — Windows has no process-to-process SIGTERM,
+so `eval` would be terminated outright and would never record what it abandoned.
+Ctrl+C still works everywhere, because a console interrupt is real on Windows
+too.
 
-WSL reports as Linux and is unaffected. Node 20 or newer is required
-everywhere.
+Three small things differ on Windows, none of them behavioural. `doctor` has no
+load average to read there, so it makes one fewer check and says so rather than
+reporting the fabricated zero the platform hands it. The state directory's
+ownership and permission check is skipped, because Windows reports synthetic
+mode bits and has no owner to compare against. And one test is skipped — the
+one that makes a directory unlistable with `chmod`, which has no Windows
+analogue.
+
+WSL reports as Linux and is unaffected. Node 20 or newer is required everywhere.
 
 ## Limitations
 

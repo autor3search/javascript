@@ -97,6 +97,17 @@ const GATE_VERDICT = {
  * @returns {Promise<{result: object, measurements: {time: object[], bytes: object[]|null}|null}>}
  */
 export async function evalOnce(o) {
+  // A sticky forced stop that is already pending when a run starts must not
+  // cost a full gate run before it is honoured: the scope diff, config hash,
+  // freeze restore and the gates themselves are all real work, and none of
+  // it should happen for an experiment that is about to be thrown away
+  // unmeasured. Checked here, before anything below touches git or the
+  // filesystem, rather than only after the gates (line 263's neighbour) —
+  // that later check exists for an abort that arrives WHILE gating is under
+  // way; this one is for an abort that was already true before evalOnce was
+  // ever called.
+  if (o.signal?.aborted) throw new Error('aborted before the experiment began')
+
   const timeoutMs = parseDuration(o.cfg.timeout)
 
   // ---- 1. Scope --------------------------------------------------------

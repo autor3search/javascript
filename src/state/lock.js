@@ -137,15 +137,21 @@ async function readLock(lockPath) {
     }
   }
   // pid <= 1 is refused, not just pid <= 0: kill(1, ...) targets init/launchd
-  // (every process on the system on some platforms), and kill(-1, ...) - the
-  // exact form `stop --force` uses for its own valid pids - means "every
-  // process the caller may signal". A pid file holding either must never be
-  // read back and handed to process.kill.
+  // (every process on the system on some platforms), and kill(-1, ...) means
+  // "every process the caller may signal". Nothing in src/cli/ hands a pid to
+  // process.kill any more — stop --force writes a marker, not a signal (see
+  // state/stop.js) — but alive() below still calls process.kill(pid, 0) as a
+  // liveness probe, and pid 1 or -1 would make that probe ALWAYS succeed. A
+  // lock is only reclaimed once BOTH the pid is dead and the heartbeat is
+  // cold (isStale, below); a pid this "alive" check can never call dead would
+  // leave that lock permanently unreclaimable, refusing every later eval on
+  // the tag forever. A pid file holding either value must never be read back
+  // and treated as one this process may trust.
   if (pid <= 1) {
     return {
       pid: null,
       heartbeat,
-      error: new Error(`${join(lockPath, 'pid')}: pid ${pid} is not a process this command will signal`),
+      error: new Error(`${join(lockPath, 'pid')}: pid ${pid} is not a pid this run will trust`),
     }
   }
   return { pid, heartbeat, error: null }

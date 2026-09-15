@@ -178,8 +178,10 @@ Three ways to end a run, in increasing order of force:
    cancellation is what tears down the benchmark process tree, so no Vitest
    worker is left burning CPU. The agent sees `"status": "ABORTED"`, exit
    code 2, and no `results.tsv` row — nothing was measured, so nothing was
-   recorded. `stop --force` reports what HEAD looks like afterward; it does
-   not touch the repository for you.
+   recorded. The marker is sticky on purpose: if nothing was running when you
+   forced the stop, it stands and aborts the *next* `eval` to start instead,
+   until you clear it with `stop --clear`. `stop --force` reports what HEAD
+   looks like afterward; it does not touch the repository for you.
 3. **Ctrl+C** — the same abort path as `stop --force`, sent directly to a
    foreground `eval`.
 

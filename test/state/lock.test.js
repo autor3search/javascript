@@ -58,14 +58,15 @@ describe('claimEval', () => {
     await expect(claimEval(dir)).rejects.toThrow(/already running/)
   })
 
-  it('refuses a pid file holding a value it must never signal', async () => {
-    // `stop --force` signals the pid's process GROUP, and kill(-1) means every
-    // process the caller may signal — so a pid file holding 1 would turn a
-    // wedged experiment into a session-wide kill.
+  it('refuses a pid file holding a value it must never trust', async () => {
+    // alive() below calls process.kill(pid, 0) as a liveness probe, and
+    // kill(1, 0) or kill(-1, 0) would report "alive" regardless of whether
+    // anything real is running — so a pid file holding either would make
+    // isStale() never reclaim the lock, stranding it forever.
     await mkdir(join(dir, LOCK_DIR), { recursive: true })
     await writeFile(join(dir, LOCK_DIR, 'pid'), '1')
     await writeFile(join(dir, LOCK_DIR, 'heartbeat'), String(Date.now()))
-    await expect(evalRunning(dir)).rejects.toThrow(/not a process this command will signal/)
+    await expect(evalRunning(dir)).rejects.toThrow(/not a pid this run will trust/)
   })
 
   it('refuses an unparseable pid rather than guessing', async () => {

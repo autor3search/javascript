@@ -283,6 +283,31 @@ describe('evalOnce — gates', () => {
   })
 })
 
+describe('evalOnce — abort', () => {
+  // cmd-eval.js's sticky-marker poll only runs every 500ms, so a forced stop
+  // already pending when a NEW eval starts cannot flip its AbortController
+  // any faster than that — by the time evalOnce is actually invoked the
+  // signal is essentially never aborted yet, which makes the CLI-level
+  // timing unsuitable for pinning down what evalOnce itself does with a
+  // signal that IS already aborted (as one is, for instance, whenever SIGINT
+  // lands before claimEval finishes). This checks that directly instead.
+  //
+  // baseline.commit is deliberately set to a commit that does not exist. An
+  // evalOnce that does not check the signal before its first real statement
+  // would reach the scope diff (gitx.changedSince, the very first thing it
+  // does) and fail with a git error about the bad revision, not with the
+  // abort message — a mock-free way to prove the checkpoint runs before any
+  // work at all, consistent with this file never stubbing out gitx.
+  it('checks an already-aborted signal before doing any work, not just before the gates', async () => {
+    const ctx = await setup()
+    await commitFiles(ctx.root, { 'src/wordcount.js': FAST_WORDCOUNT })
+    ctx.baseline.commit = '0000000000000000000000000000000000000000'
+    const controller = new AbortController()
+    controller.abort()
+    await expect(run({ ...ctx, signal: controller.signal })).rejects.toThrow(/aborted before the experiment began/)
+  })
+})
+
 describe('evalOnce — measurement', () => {
   it('returns a decided verdict and time deltas for a real experiment', async () => {
     const ctx = await setup()

@@ -81,9 +81,11 @@ export async function runEval(args, io) {
   // run starts must abort it at its first checkpoint, not after it has claimed
   // the run and begun measuring.
   const poll = setInterval(() => {
-    forceRequested(run.stateDir).then((forced) => {
-      if (forced) controller.abort()
-    })
+    forceRequested(run.stateDir)
+      .then((forced) => {
+        if (forced) controller.abort()
+      })
+      .catch(() => {})
   }, FORCE_POLL_MS)
   poll.unref()
   const detach = () => {

@@ -51,10 +51,24 @@ describe('stop', () => {
     expect(out).toMatch(/will abort the next eval/i)
   })
 
-  it('still writes the request when --force finds nothing to signal', async () => {
+  it('still writes the request when --force finds no eval running to abandon', async () => {
     const dir = await ready()
     await runCli(['stop', '-C', dir, '--force'])
     expect(await stopRequested(await stateDir(dir, 't'))).toBe(true)
+  })
+
+  it('warns a later plain stop that a forced stop from earlier is still pending', async () => {
+    // stop --force issued while nothing was running leaves the marker sticky
+    // — it aborts the NEXT eval, not this session's. A human who later runs
+    // plain `stop` (forgetting --clear) must not be told the current
+    // experiment will be measured: there may be no current experiment, and
+    // the marker will still take out whichever eval starts next.
+    const dir = await ready()
+    await runCli(['stop', '-C', dir, '--force'])
+    const { code, out } = await runCli(['stop', '-C', dir])
+    expect(code).toBe(0)
+    expect(out).toMatch(/forced stop from earlier is still pending/i)
+    expect(out).not.toMatch(/will still be measured/i)
   })
 
   it('writes the forced marker, not just the graceful request', async () => {

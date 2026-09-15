@@ -14,7 +14,7 @@
 import { parseArgs } from 'node:util'
 import * as gitx from '../gitx.js'
 import { evalRunning } from '../state/lock.js'
-import { clearStop, requestForceStop, requestStop } from '../state/stop.js'
+import { clearStop, forceRequested, requestForceStop, requestStop } from '../state/stop.js'
 import { expandSingleDashFlags, resolveRun } from './context.js'
 
 /**
@@ -50,7 +50,16 @@ export async function runStop(args, io) {
   await requestStop(run.stateDir)
   io.out.write(`stop requested for ${run.tag}: the agent will end the run after the current experiment\n`)
   if (!values.force) {
-    io.out.write('the experiment under way will still be measured, scored and applied\n')
+    // A plain `stop` only promises the current experiment survives when
+    // nothing is already asking to abandon it. A forced stop from EARLIER —
+    // `stop --force` issued when nothing was running, then never cleared —
+    // is still pending and sticky, and it will abort the next eval to start
+    // regardless of what this plain `stop` just requested.
+    if (await forceRequested(run.stateDir)) {
+      io.out.write('a forced stop from earlier is still pending, though, and will abort the next eval to start\n')
+    } else {
+      io.out.write('the experiment under way will still be measured, scored and applied\n')
+    }
     io.out.write(`to cancel: autor3search-javascript stop -tag ${run.tag} --clear\n`)
     return 0
   }

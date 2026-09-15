@@ -23,14 +23,15 @@ import { expandSingleDashFlags, resolveRun } from './context.js'
  * @returns {Promise<number>}
  */
 export async function runStop(args, io) {
+  const options = {
+    C: { type: 'string', default: '.' },
+    tag: { type: 'string' },
+    clear: { type: 'boolean', default: false },
+    force: { type: 'boolean', default: false },
+  }
   const { values } = parseArgs({
-    args: expandSingleDashFlags(args, ['tag']),
-    options: {
-      C: { type: 'string', default: '.' },
-      tag: { type: 'string' },
-      clear: { type: 'boolean', default: false },
-      force: { type: 'boolean', default: false },
-    },
+    args: expandSingleDashFlags(args, options),
+    options,
     allowPositionals: false,
   })
 

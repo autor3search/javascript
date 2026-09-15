@@ -24,20 +24,37 @@ import { join } from 'node:path'
  * Only an exact whole-token match is rewritten, so a VALUE that happens to
  * look like a flag (`-desc "-tag is confusing"`) is left alone.
  *
+ * The parseArgs OPTIONS are the input, not a list of names, and that is
+ * load-bearing. A hand-kept list is free to fall out of step with the
+ * declaration beside it, and did: `stop` accepted `-tag` but not the `-force`
+ * the README documents, so `stop -force` failed with "Unknown option '-f'"
+ * until this was derived instead. Deriving it means a flag cannot be
+ * documented, declared, and still unparseable.
+ *
+ * Whether a flag consumes the token after it comes from its declared `type`.
+ * A boolean takes no value, so the next token is another flag and must still
+ * be expanded — skipping it is what made `-force -tag t` die on "Unknown
+ * option '-t'". Single-character names are left alone because parseArgs
+ * already accepts them in single-dash form; `-C` must stay `-C`.
+ *
  * @param {string[]} args
- * @param {string[]} names long option names to accept in single-dash form
+ * @param {Record<string, {type: string}>} options the same parseArgs options the caller parses with
  * @returns {string[]}
  */
-export function expandSingleDashFlags(args, names) {
-  const single = new Set(names.map((name) => `-${name}`))
+export function expandSingleDashFlags(args, options) {
+  const expandable = new Map(
+    Object.entries(options)
+      .filter(([name]) => name.length > 1)
+      .map(([name, opt]) => [`-${name}`, opt.type !== 'boolean']),
+  )
   let expectingValue = false
   return args.map((token) => {
     if (expectingValue) {
       expectingValue = false
       return token
     }
-    if (single.has(token)) {
-      expectingValue = true
+    if (expandable.has(token)) {
+      expectingValue = expandable.get(token)
       return `--${token.slice(1)}`
     }
     return token

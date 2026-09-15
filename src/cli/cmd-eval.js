@@ -29,14 +29,15 @@ const FORCE_POLL_MS = 500
  * @returns {Promise<number>}
  */
 export async function runEval(args, io) {
+  const options = {
+    C: { type: 'string', default: '.' },
+    json: { type: 'boolean', default: false },
+    desc: { type: 'string', default: '' },
+    'no-log': { type: 'boolean', default: false },
+  }
   const { values } = parseArgs({
-    args: expandSingleDashFlags(args, ['desc']),
-    options: {
-      C: { type: 'string', default: '.' },
-      json: { type: 'boolean', default: false },
-      desc: { type: 'string', default: '' },
-      'no-log': { type: 'boolean', default: false },
-    },
+    args: expandSingleDashFlags(args, options),
+    options,
     allowPositionals: false,
   })
 

@@ -57,6 +57,28 @@ describe('stop', () => {
     expect(await stopRequested(await stateDir(dir, 't'))).toBe(true)
   })
 
+  it('accepts the single-dash -force the README documents', async () => {
+    // README's agent prompt tells the human "I may run `stop -force` myself".
+    // It used to fail with "Unknown option '-f'": parseArgs only takes a single
+    // dash for a single-character name, and -force was never expanded. The
+    // unit test in context.test.js covers the expansion; this covers the
+    // spelling a human actually types.
+    const dir = await ready()
+    const { code } = await runCli(['stop', '-C', dir, '-force'])
+    expect(code).toBe(0)
+    expect(await forceRequested(await stateDir(dir, 't'))).toBe(true)
+  })
+
+  it('accepts -force and -tag together, in either order', async () => {
+    // A boolean consumes no value, so the flag after it must still be expanded.
+    const dir = await ready()
+    expect((await runCli(['stop', '-C', dir, '-force', '-tag', 't'])).code).toBe(0)
+    expect(await forceRequested(await stateDir(dir, 't'))).toBe(true)
+    await runCli(['stop', '-C', dir, '--clear'])
+    expect((await runCli(['stop', '-C', dir, '-tag', 't', '-force'])).code).toBe(0)
+    expect(await forceRequested(await stateDir(dir, 't'))).toBe(true)
+  })
+
   it('warns a later plain stop that a forced stop from earlier is still pending', async () => {
     // stop --force issued while nothing was running leaves the marker sticky
     // — it aborts the NEXT eval, not this session's. A human who later runs

@@ -28,13 +28,14 @@ import {
 import { expandSingleDashFlags, loadRepoConfig, resolveRepo } from './context.js'
 
 export async function runBaseline(args, io) {
+  const options = {
+    C: { type: 'string', default: '.' },
+    tag: { type: 'string', default: defaultTag() },
+    force: { type: 'boolean', default: false },
+  }
   const { values } = parseArgs({
-    args: expandSingleDashFlags(args, ['tag']),
-    options: {
-      C: { type: 'string', default: '.' },
-      tag: { type: 'string', default: defaultTag() },
-      force: { type: 'boolean', default: false },
-    },
+    args: expandSingleDashFlags(args, options),
+    options,
     allowPositionals: false,
   })
 

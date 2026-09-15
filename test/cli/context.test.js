@@ -84,20 +84,48 @@ describe('loadRepoConfig', () => {
 })
 
 describe('expandSingleDashFlags', () => {
+  // The real `stop` declaration: one string option, two booleans, and the
+  // single-character -C. Passing the parseArgs options themselves is the
+  // point — a hand-kept list of names is what let -force go unexpanded.
+  const STOP_OPTIONS = {
+    C: { type: 'string' },
+    tag: { type: 'string' },
+    clear: { type: 'boolean' },
+    force: { type: 'boolean' },
+  }
+
   it('rewrites a documented single-dash flag into the form parseArgs accepts', () => {
-    expect(expandSingleDashFlags(['-tag', 'sep7'], ['tag'])).toEqual(['--tag', 'sep7'])
+    expect(expandSingleDashFlags(['-tag', 'sep7'], STOP_OPTIONS)).toEqual(['--tag', 'sep7'])
   })
 
   it('leaves single-character flags and long forms alone', () => {
-    expect(expandSingleDashFlags(['-C', '/tmp', '--tag', 'x'], ['tag'])).toEqual(['-C', '/tmp', '--tag', 'x'])
+    expect(expandSingleDashFlags(['-C', '/tmp', '--tag', 'x'], STOP_OPTIONS)).toEqual(['-C', '/tmp', '--tag', 'x'])
   })
 
   it('does not rewrite a VALUE that looks like a flag', () => {
     // `-desc "-tag is confusing"` must keep its value verbatim.
-    expect(expandSingleDashFlags(['-desc', '-tag'], ['desc', 'tag'])).toEqual(['--desc', '-tag'])
+    const options = { desc: { type: 'string' }, tag: { type: 'string' } }
+    expect(expandSingleDashFlags(['-desc', '-tag'], options)).toEqual(['--desc', '-tag'])
   })
 
   it('leaves an unrelated token untouched', () => {
-    expect(expandSingleDashFlags(['-nope', 'x'], ['tag'])).toEqual(['-nope', 'x'])
+    expect(expandSingleDashFlags(['-nope', 'x'], STOP_OPTIONS)).toEqual(['-nope', 'x'])
+  })
+
+  it('rewrites a single-dash BOOLEAN flag, which README documents for stop', () => {
+    expect(expandSingleDashFlags(['-force'], STOP_OPTIONS)).toEqual(['--force'])
+    expect(expandSingleDashFlags(['-clear'], STOP_OPTIONS)).toEqual(['--clear'])
+  })
+
+  it('does not swallow the token after a boolean flag', () => {
+    // A boolean takes no value, so the token after it is another flag and must
+    // still be expanded. Treating it as a value is what made the first attempt
+    // at this fix wrong: `-force -tag t` became `['--force', '-tag', 't']` and
+    // died on "Unknown option '-t'" — one bug traded for a subtler one.
+    expect(expandSingleDashFlags(['-force', '-tag', 't'], STOP_OPTIONS)).toEqual(['--force', '--tag', 't'])
+  })
+
+  it('still treats a string option as taking a value, in either order', () => {
+    expect(expandSingleDashFlags(['-tag', 't', '-force'], STOP_OPTIONS)).toEqual(['--tag', 't', '--force'])
   })
 })

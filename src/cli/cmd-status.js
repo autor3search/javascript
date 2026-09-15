@@ -17,9 +17,10 @@ import { expandSingleDashFlags, resolveRun } from './context.js'
  * @returns {Promise<number>}
  */
 export async function runStatus(args, io) {
+  const options = { C: { type: 'string', default: '.' }, tag: { type: 'string' } }
   const { values } = parseArgs({
-    args: expandSingleDashFlags(args, ['tag']),
-    options: { C: { type: 'string', default: '.' }, tag: { type: 'string' } },
+    args: expandSingleDashFlags(args, options),
+    options,
     allowPositionals: false,
   })
 

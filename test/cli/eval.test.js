@@ -270,10 +270,16 @@ describe('eval', () => {
     // Every abort test above interrupts a run already under way. The sticky
     // marker's whole point is the opposite case: `stop --force` left the
     // marker behind after an earlier eval aborted, and it is STILL there,
-    // unconsumed, when the next eval starts — spec says that must be caught
-    // within one poll interval (~500ms), not after a full correctness gate.
-    // A repo whose test gate takes 8s if ever reached turns "checked late"
-    // into an unmissably slow test rather than a subtle wrong verdict.
+    // unconsumed, when the next eval starts.
+    //
+    // This covers that end to end — exit 2, ABORTED, no row, claim released —
+    // and NOT the entry checkpoint in evalOnce that makes it prompt. It cannot:
+    // without that checkpoint the poll still fires at ~500ms, and the abort
+    // listener Runner registers kills the gate subprocess mid-flight, so the
+    // same verdict arrives at roughly the same speed by an older route. The
+    // checkpoint itself is covered by the unit test in pipeline.test.js, which
+    // calls evalOnce with an already-aborted signal and genuinely fails
+    // without it. Keep both: this one guards the contract, that one the fix.
     const dir = await makeBenchRepo()
     await runCli(['init', '-C', dir])
     await writeFiles(dir, {
@@ -305,9 +311,11 @@ describe('eval', () => {
     const code = await new Promise((resolve) => child.on('close', resolve))
     const elapsed = Date.now() - start
 
-    // Generous ceiling, not a tight bound: well under the 8s the test gate
-    // would cost if the marker were only noticed after claiming and gating,
-    // with headroom for windows-latest, the slowest runner in the matrix.
+    // Generous ceiling, not a tight bound. The 8s gate above is what makes it
+    // mean anything: an eval that sat through it would blow this, whichever
+    // route noticed the marker. Headroom is for windows-latest, the slowest
+    // runner in the matrix — raise the ceiling if it ever flakes there rather
+    // than trimming the gate, which is the part doing the work.
     expect(elapsed).toBeLessThan(6000)
     expect(code).toBe(2)
     const payload = JSON.parse(out)

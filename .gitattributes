@@ -1,0 +1,4 @@
+# program.md is a frozen contract copied verbatim into the user's repository,
+# and init.test.js parses it. Pin it to LF so a Windows checkout does not turn
+# every paragraph boundary into CRLF under the test's feet.
+templates/program.md text eol=lf

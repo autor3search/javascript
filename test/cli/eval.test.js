@@ -6,11 +6,13 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { STATE_HOME_ENV, stateDir } from '../../src/state/index.js'
 import { claimEval, evalRunning } from '../../src/state/lock.js'
-import { requestStop } from '../../src/state/stop.js'
+import { requestForceStop, requestStop } from '../../src/state/stop.js'
 import { loadRows } from '../../src/results.js'
 import { runCli } from '../helpers/cli.js'
 import { FAST_WORDCOUNT, WORDCOUNT_TEST, makeBenchRepo } from '../helpers/bench-repo.js'
 import { commitFiles, writeFiles } from '../helpers/repo.js'
+
+const posix = typeof process.getuid === 'function'
 
 const original = process.env[STATE_HOME_ENV]
 beforeEach(async () => {
@@ -139,11 +141,12 @@ describe('eval', () => {
     await expect(stat(join(dir, 'run.log'))).rejects.toThrow()
   })
 
-  it('reports ABORTED on SIGINT: no results row, claim released, stop state honest', async () => {
+  it('reports ABORTED on a forced stop: no results row, claim released, stop state honest', async () => {
     // The whole abort contract in one test. Nothing was measured, so nothing
     // may be recorded — and a stranded claim would block every later eval.
     // This spawns the REAL binary (rather than runCli's in-process dispatch)
-    // because a real OS signal has to land on a real process.
+    // because the marker has to be seen by a separate process's poller, which
+    // is the whole mechanism under test.
     const dir = await ready()
     await commitFiles(dir, { 'src/wordcount.js': FAST_WORDCOUNT })
     const bin = fileURLToPath(new URL('../../bin/autor3search-javascript.js', import.meta.url))
@@ -175,10 +178,10 @@ describe('eval', () => {
       await new Promise((r) => setTimeout(r, 100))
     }
     // Sanity check on the wait itself: if the child had already finished
-    // before we got to send the signal, everything below would still pass
+    // before we got to write the marker, everything below would still pass
     // but for the wrong reason (a completed run, not an aborted one).
     expect(closed).toBe(false)
-    child.kill('SIGINT')
+    await requestForceStop(state)
 
     const code = await new Promise((resolve) => child.on('close', resolve))
     expect(code).toBe(2)
@@ -192,18 +195,19 @@ describe('eval', () => {
     expect((await evalRunning(state)).running).toBe(false)
   })
 
-  it('reports ABORTED, not FAIL, when SIGINT lands during the test gate rather than measurement', async () => {
+  it('reports ABORTED, not FAIL, when a forced stop lands during the test gate rather than measurement', async () => {
     // The gate phase used to ignore the abort signal entirely: Ctrl+C during
     // `tsc`/`eslint`/`vitest` would not be seen until measure() started, and
     // a subprocess killed mid-gate would look like a genuinely failing test
     // (FAIL, with a results.tsv row) rather than an aborted experiment. This
     // proves both: the interrupt is now honoured promptly, and it still
     // produces ABORTED with no row when it hits the slowest gate — the test
-    // gate — instead of the measurement phase the other SIGINT test covers.
+    // gate — instead of the measurement phase the POSIX-only SIGINT test
+    // further below covers.
     const dir = await makeBenchRepo()
     await runCli(['init', '-C', dir])
     // A frozen test that sleeps well past both this test's patience and the
-    // point where the other SIGINT test's interrupt already lands (during
+    // point where the SIGINT test's interrupt already lands (during
     // measurement) guarantees THIS interrupt instead lands while the test
     // gate's vitest subprocess is still running. testTimeout is raised so
     // vitest's own per-test timeout never fires first and masks the point
@@ -232,9 +236,10 @@ describe('eval', () => {
       closed = true
     })
 
-    // Wait until the claim is held (the run has started), same as the other
-    // SIGINT test, then give the fast typecheck/lint gates a moment to clear
-    // so the interrupt below is guaranteed to land on the slow test gate.
+    // Wait until the claim is held (the run has started), same as the SIGINT
+    // test further below, then give the fast typecheck/lint gates a moment
+    // to clear so the interrupt below is guaranteed to land on the slow test
+    // gate.
     const state = await stateDir(dir, 't')
     const claimDeadline = Date.now() + 60_000
     while (Date.now() < claimDeadline && !closed) {
@@ -245,7 +250,7 @@ describe('eval', () => {
     await new Promise((r) => setTimeout(r, 1500))
     expect(closed).toBe(false) // still inside the 8s test gate, not finished on its own
 
-    child.kill('SIGINT')
+    await requestForceStop(state)
     const code = await new Promise((resolve) => child.on('close', resolve))
     const elapsed = Date.now() - start
 
@@ -253,6 +258,95 @@ describe('eval', () => {
     // and typecheck) before doing anything; the fix kills the gate's
     // subprocess group immediately on abort.
     expect(elapsed).toBeLessThan(6000)
+    expect(code).toBe(2)
+    const payload = JSON.parse(out)
+    expect(payload.status).toBe('ABORTED')
+    expect(payload.reason).toBe('stop_forced')
+    expect(await loadRows(join(dir, 'results.tsv'))).toHaveLength(0)
+    expect((await evalRunning(state)).running).toBe(false)
+  })
+
+  it('honours a forced-stop marker that is already pending before the run starts', async () => {
+    // Every abort test above interrupts a run already under way. The sticky
+    // marker's whole point is the opposite case: `stop --force` left the
+    // marker behind after an earlier eval aborted, and it is STILL there,
+    // unconsumed, when the next eval starts — spec says that must be caught
+    // within one poll interval (~500ms), not after a full correctness gate.
+    // A repo whose test gate takes 8s if ever reached turns "checked late"
+    // into an unmissably slow test rather than a subtle wrong verdict.
+    const dir = await makeBenchRepo()
+    await runCli(['init', '-C', dir])
+    await writeFiles(dir, {
+      'src/wordcount.test.js': `${WORDCOUNT_TEST}\ntest('slow gate', async () => {\n  await new Promise((r) => setTimeout(r, 8000))\n})\n`,
+      'vitest.config.js': 'export default { test: { testTimeout: 30000 } }\n',
+      '.autor3search/config.yaml': 'benchmarks: ["countWords"]\ncount: 4\nscope: ["src/**"]\nheap_hint: false\n',
+    })
+    await commitFiles(dir, {}, 'init')
+    await runCli(['baseline', '-C', dir, '-tag', 't'])
+    await commitFiles(dir, { 'src/wordcount.js': FAST_WORDCOUNT })
+
+    // The marker exists BEFORE eval is even spawned — nothing to interrupt,
+    // just a sentinel already sitting on disk from an earlier, unrelated
+    // `stop --force`.
+    const state = await stateDir(dir, 't')
+    await requestForceStop(state)
+
+    const bin = fileURLToPath(new URL('../../bin/autor3search-javascript.js', import.meta.url))
+    const start = Date.now()
+    const child = spawn(process.execPath, [bin, 'eval', '-C', dir, '--json', '-desc', 'pre-aborted'], {
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    child.stdout.on('data', (chunk) => {
+      out += chunk
+    })
+
+    const code = await new Promise((resolve) => child.on('close', resolve))
+    const elapsed = Date.now() - start
+
+    // Generous ceiling, not a tight bound: well under the 8s the test gate
+    // would cost if the marker were only noticed after claiming and gating,
+    // with headroom for windows-latest, the slowest runner in the matrix.
+    expect(elapsed).toBeLessThan(6000)
+    expect(code).toBe(2)
+    const payload = JSON.parse(out)
+    expect(payload.status).toBe('ABORTED')
+    expect(payload.reason).toBe('stop_forced')
+    expect(await loadRows(join(dir, 'results.tsv'))).toHaveLength(0)
+    expect((await evalRunning(state)).running).toBe(false)
+  })
+
+  // Windows has no process-to-process signal, so this can only be asserted on
+  // POSIX. The forced-stop tests above cover the same abort path everywhere;
+  // this one exists so the signal handler itself does not rot.
+  it.skipIf(!posix)('reports ABORTED on SIGINT, the path Ctrl+C uses', async () => {
+    const dir = await ready()
+    await commitFiles(dir, { 'src/wordcount.js': FAST_WORDCOUNT })
+    const bin = fileURLToPath(new URL('../../bin/autor3search-javascript.js', import.meta.url))
+    const child = spawn(process.execPath, [bin, 'eval', '-C', dir, '--json', '-desc', 'sigint run'], {
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    child.stdout.on('data', (chunk) => {
+      out += chunk
+    })
+    let closed = false
+    child.on('close', () => {
+      closed = true
+    })
+
+    const state = await stateDir(dir, 't')
+    const deadline = Date.now() + 60_000
+    while (Date.now() < deadline && !closed) {
+      if ((await evalRunning(state)).running) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(closed).toBe(false)
+    child.kill('SIGINT')
+
+    const code = await new Promise((resolve) => child.on('close', resolve))
     expect(code).toBe(2)
     const payload = JSON.parse(out)
     expect(payload.status).toBe('ABORTED')

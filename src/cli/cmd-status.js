@@ -8,7 +8,7 @@ import * as gitx from '../gitx.js'
 import { RESULTS_PATH, loadRows } from '../results.js'
 import { BASELINE_FILE, WORKTREE_NAME, loadBaseline } from '../state/index.js'
 import { evalRunning } from '../state/lock.js'
-import { stopRequested } from '../state/stop.js'
+import { forceRequested, stopRequested } from '../state/stop.js'
 import { expandSingleDashFlags, resolveRun } from './context.js'
 
 /**
@@ -42,6 +42,7 @@ export async function runStatus(args, io) {
     evalLine = `unknown (${err.message})`
   }
   const stopped = await stopRequested(run.stateDir)
+  const forced = await forceRequested(run.stateDir)
 
   const field = (name, value) => io.out.write(`${name.padEnd(14)} ${value}\n`)
   field('run tag', run.tag)
@@ -60,7 +61,14 @@ export async function runStatus(args, io) {
       `${counts.crash} crash)  — next is #${rows.length + 1}`,
   )
   field('eval', evalLine)
-  field('stop', stopped ? 'requested — the agent will end the run after the current experiment' : 'not requested')
+  field(
+    'stop',
+    forced
+      ? 'FORCED — the next eval will abort at once; clear it with `autor3search-javascript stop --clear`'
+      : stopped
+        ? 'requested — the agent will end the run after the current experiment'
+        : 'not requested',
+  )
 
   io.out.write('\nto stop after the current experiment:  autor3search-javascript stop\n')
   io.out.write('to stop now, abandoning it:            autor3search-javascript stop --force\n')

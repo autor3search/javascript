@@ -1,6 +1,6 @@
 import { chmod, lstat, mkdtemp, readFile, readlink, stat, symlink, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   STATE_HOME_ENV,
@@ -56,7 +56,7 @@ describe('stateDir', () => {
   it('lives under the state home, keyed by repository and tag', async () => {
     const dir = await stateDir(repo, 'sep4')
     expect(dir.startsWith(home)).toBe(true)
-    expect(dir.endsWith('/sep4')).toBe(true)
+    expect(dir.endsWith(`${sep}sep4`)).toBe(true)
   })
 
   it('gives different repositories different keys', async () => {

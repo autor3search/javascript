@@ -16,9 +16,12 @@ import { RUN_LOG_NAME, evalOnce } from '../pipeline.js'
 import { RESULTS_PATH, appendRow, loadRows } from '../results.js'
 import { BASELINE_FILE, WORKTREE_NAME, loadBaseline } from '../state/index.js'
 import { claimEval } from '../state/lock.js'
-import { stopRequested } from '../state/stop.js'
+import { forceRequested, stopRequested } from '../state/stop.js'
 import { REASON, STATUS, exitCode } from '../verdict.js'
 import { expandSingleDashFlags, loadRepoConfig, resolveRun } from './context.js'
+
+/** How often a running eval looks for a forced-stop marker. */
+const FORCE_POLL_MS = 500
 
 /**
  * @param {string[]} args
@@ -72,9 +75,23 @@ export async function runEval(args, io) {
   const onSignal = () => controller.abort()
   process.on('SIGINT', onSignal)
   process.on('SIGTERM', onSignal)
-  const offSignals = () => {
+  // The forced stop is a polled marker, not a signal — see state/stop.js for
+  // why. It is installed here, beside the handlers and BEFORE claimEval, for
+  // exactly the reason spelled out above: a marker already pending when this
+  // run starts must abort it at its first checkpoint, not after it has claimed
+  // the run and begun measuring.
+  const poll = setInterval(() => {
+    forceRequested(run.stateDir)
+      .then((forced) => {
+        if (forced) controller.abort()
+      })
+      .catch(() => {})
+  }, FORCE_POLL_MS)
+  poll.unref()
+  const detach = () => {
     process.off('SIGINT', onSignal)
     process.off('SIGTERM', onSignal)
+    clearInterval(poll)
   }
 
   let claim
@@ -83,7 +100,7 @@ export async function runEval(args, io) {
   } catch (err) {
     // dispatch() also runs in-process under test, so a leaked listener here
     // would accumulate across runs rather than dying with the process.
-    offSignals()
+    detach()
     io.err.write(`${err.message}\n`)
     return 2
   }
@@ -128,11 +145,21 @@ export async function runEval(args, io) {
     if (controller.signal.aborted) {
       // ABORTED is not a verdict: nothing was measured, so NO results.tsv row
       // is written. The agent treats it as it would a FAIL.
+      //
+      // A sticky forced stop aborts every later eval on this tag too, so an
+      // abort that finds the marker still pending must say so and name the
+      // cure. It goes in `message` — which writeJson already emits and the
+      // human path already writes to io.err — rather than in a new line of
+      // output, because --json's contract is that stdout carries the verdict
+      // object and nothing else.
+      const forced = await forceRequested(run.stateDir).catch(() => false)
       const aborted = {
         status: STATUS.ABORTED,
         reason: REASON.STOP_FORCED,
         score: 0,
-        message: 'the experiment was interrupted before it could be measured',
+        message: forced
+          ? 'the experiment was abandoned: a forced stop is pending for this tag — clear it with `stop --clear` before the next eval'
+          : 'the experiment was interrupted before it could be measured',
         regressions: [],
         warnings: [],
       }
@@ -149,7 +176,7 @@ export async function runEval(args, io) {
     }
     throw err
   } finally {
-    offSignals()
+    detach()
     await closeLog(logStream)
     await claim.release()
   }

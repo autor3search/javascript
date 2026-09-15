@@ -183,6 +183,21 @@ class Capped {
  * Signals a child's whole process group. A negative pid addresses the group.
  * Failures are swallowed: the group is already gone in the common case, and a
  * teardown that throws would mask the real result being reported.
+ *
+ * On Windows there are no process groups, so `process.kill(-pid, …)` throws and
+ * the fallback terminates only the direct child — yet grandchildren still die,
+ * and runner.test.js proves it on every platform. The reason is libuv: it
+ * assigns each non-detached child to a global job object with
+ * JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, so when the direct child dies, its job
+ * handle closes and everything it spawned goes with it.
+ *
+ * That holds only because EVERY subprocess this harness starts is
+ * process.execPath — see adapters/bench/vitest.js and adapters/gates/*.js — so
+ * every intermediate is a Node process carrying such a job object. Two changes
+ * would silently break it and leave vitest's workers running on Windows,
+ * burning CPU and corrupting every later measurement: running a gate through
+ * `npm`/`npx` (a .cmd, so cmd.exe becomes the intermediate and there is no job
+ * object), or adding `detached: true` to an inner spawn.
  */
 function killGroup(pid, signal) {
   if (!pid) return

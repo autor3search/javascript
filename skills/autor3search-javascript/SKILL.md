@@ -21,6 +21,8 @@ user. Follow every step and rule in it, in order.
 Install and run autor3search-javascript on this repository, then optimize it.
 
 Setup:
+0. Run git status. If the working tree has changes, STOP and ask me to
+   commit or stash them first.
 1. npm install -g @autor3search/javascript
    Or prefix every command below with `npx` instead — either way, keep using
    the same form for the whole run, so the version that recorded the baseline

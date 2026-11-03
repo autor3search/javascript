@@ -17,7 +17,15 @@
     "optimization",
     "vitest",
     "ai-agent",
-    "harness"
+    "harness",
+    "claude-code",
+    "cursor",
+    "codex",
+    "coding-agent",
+    "agent-skill",
+    "benchmarking",
+    "perf",
+    "ai-optimization"
   ],
   "bin": {
     "autor3search-javascript": "bin/autor3search-javascript.js"
